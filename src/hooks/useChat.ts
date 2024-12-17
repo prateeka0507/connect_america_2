@@ -2,11 +2,10 @@
 import { useState } from 'react';
 import { ChatMessage } from '@/types/chat';
 
-// Direct URL instead of environment variable
 const API_URL = 'https://connect-america-2.vercel.app';
 
 export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<(ChatMessage & { urls?: string[] })[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +24,7 @@ export function useChat() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({
           message: content,
@@ -33,7 +33,8 @@ export function useChat() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
@@ -44,15 +45,18 @@ export function useChat() {
         content,
       };
       
-      const assistantMessage: ChatMessage = {
+      const assistantMessage: ChatMessage & { urls?: string[] } = {
         role: 'assistant',
         content: data.response || 'Sorry, I could not process your request.',
+        urls: data.urls?.map((url: { url: string } | string) => 
+          typeof url === 'string' ? url : url.url
+        ) || []
       };
 
       setMessages(prev => [...prev, userMessage, assistantMessage]);
     } catch (err) {
       console.error('Chat error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setError(err instanceof Error ? err.message : 'Failed to send message. Please check if the API server is running.');
     } finally {
       setLoading(false);
     }
@@ -60,8 +64,8 @@ export function useChat() {
 
   return {
     messages,
-    sendMessage,
     loading,
-    error
+    error,
+    sendMessage
   };
 }
