@@ -119,18 +119,19 @@ def process_response(response, source_documents):
     # Create a dictionary of valid URLs from source documents
     valid_urls = {doc.metadata.get('s3_url'): doc for doc in source_documents if doc.metadata.get('s3_url')}
     
-    verified_urls = []
+    # Use a dictionary to track unique URLs and their content
+    unique_urls = {}
     for url in urls_in_response:
-        if url in valid_urls:
-            verified_urls.append({
+        if url in valid_urls and url not in unique_urls:
+            unique_urls[url] = {
                 'url': url,
                 'content': valid_urls[url].page_content
-            })
+            }
     
     # Clean up the response by removing the URL tags
     cleaned_response = re.sub(url_pattern, '', response)
     
-    return cleaned_response, verified_urls
+    return cleaned_response, list(unique_urls.values())
 
 def verify_database():
     try:
