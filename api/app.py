@@ -420,7 +420,7 @@ def search():
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'https://connect-america-2-frontend.vercel.app/')
+    response.headers.add('Access-Control-Allow-Origin', 'https://connect-america-2-frontend.vercel.app')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
