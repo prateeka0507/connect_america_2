@@ -3,9 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useChat } from '@/hooks/useChat';
 import ReactMarkdown from 'react-markdown';
 import { KeyboardEvent } from 'react';
+import References from '@/components/References';
 
 export default function ChatPage() {
-  const { messages, sendMessage, loading } = useChat();
+  const { messages, loading, error, sendMessage } = useChat();
   const [inputValue, setInputValue] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -136,14 +137,16 @@ export default function ChatPage() {
                 {message.role === 'assistant' ? 'AI Assistant' : 'You'}
               </div>
               <div className="text-gray-700 prose prose-sm sm:prose-base prose-blue max-w-none">
-                {message.role === 'assistant' ? (
-                  <ReactMarkdown className="markdown-content">
-                    {message.content}
-                  </ReactMarkdown>
-                ) : (
-                  <div className="user-message text-sm sm:text-base">{message.content}</div>
-                )}
+                <ReactMarkdown className="markdown-content">
+                  {message.content}
+                </ReactMarkdown>
               </div>
+              {message.role === 'assistant' && 
+               message.urls && 
+               message.urls.length > 0 && 
+               index === messages.length - 1 && (
+                <References urls={message.urls} />
+              )}
             </div>
           ))}
           
@@ -206,6 +209,12 @@ export default function ChatPage() {
           className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+          <span className="block sm:inline">{error}</span>
+        </div>
       )}
     </div>
   );
