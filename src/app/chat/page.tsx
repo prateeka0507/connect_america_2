@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useChat } from '@/hooks/useChat';
 import ReactMarkdown from 'react-markdown';
+import { KeyboardEvent } from 'react';
 
 export default function ChatPage() {
   const { messages, sendMessage, loading, error: chatError } = useChat();
@@ -35,9 +36,10 @@ export default function ChatPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      handleSubmit(e);
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as any);
     }
   };
 
