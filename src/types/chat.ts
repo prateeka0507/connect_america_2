@@ -6,5 +6,12 @@ export interface ChatMessage {
 
 export interface ChatResponse {
   response: string;
+  urls: string[];
+}
+
+export interface Reference {
+  id: string;
+  title: string;
+  url: string;
 }
 
