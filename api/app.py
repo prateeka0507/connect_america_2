@@ -275,7 +275,7 @@ def chat():
                 - Customer support protocols
                 - Medication tracking systems
             4. A follow-up question to the previous conversation about these topics
-            5. Contains inappropriate or harmful content
+            5. Related to violence, harmful activities, or other inappropriate content
             6. Completely unrelated to Connect America's healthcare services
 
             If it falls under category 1, respond with 'GREETING'. 
