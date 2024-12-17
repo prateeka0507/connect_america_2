@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { ChatMessage, ChatResponse } from '@/types/chat';
 
 // Direct URL instead of environment variable
-const API_URL = 'http://localhost:5000';
+const API_URL = 'https://connect-america-2.vercel.app';
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
