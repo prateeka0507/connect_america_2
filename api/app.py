@@ -427,6 +427,5 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
-if __name__ == '__main__':
-    verify_database()
-    app.run(debug=True, port=5000)
+if __name__ == '__main__':  
+    app.run(debug=True)
