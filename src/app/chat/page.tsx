@@ -189,12 +189,7 @@ export default function ChatPage() {
                 e.target.style.height = `${e.target.scrollHeight}px`;
               }}
               disabled={loading}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
+              onKeyDown={handleKeyDown}
             />
             <button 
               type="submit"
