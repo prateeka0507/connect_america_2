@@ -22,6 +22,9 @@ import json
 import numpy as np
 from typing import List
 from pydantic import BaseModel, Field
+import sys
+import traceback
+from datetime import datetime
 
 class LLMResponseError(Exception):
     pass
@@ -83,7 +86,11 @@ os.environ["LANGCHAIN_PROJECT"] = "connect-america"
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-4o-2024-11-20", temperature=0)
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = app.logger
 
 def rewrite_query(query, chat_history=None):
     """
@@ -287,111 +294,54 @@ def test():
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        # Log incoming request
-        app.logger.debug(f"Received request: {request.json}")
+        # Log request details
+        logger.info(f"Request received at: {datetime.now()}")
+        logger.info(f"Request headers: {dict(request.headers)}")
         
-        # Get the data from request
-        data = request.json
-        user_query = data.get('message')
+        # Verify request data
+        if not request.is_json:
+            logger.error("Request is not JSON")
+            return jsonify({'error': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        logger.info(f"Request data: {data}")
+        
+        # Validate required fields
+        if 'message' not in data:
+            logger.error("No message field in request")
+            return jsonify({'error': 'message field is required'}), 400
+
+        user_query = data['message']
         chat_history = data.get('chat_history', [])
 
-        if not user_query:
-            return jsonify({'error': 'No message provided'}), 400
+        # Log processing steps
+        logger.info(f"Processing user query: {user_query}")
+        logger.info(f"Chat history length: {len(chat_history)}")
 
-        try:
-            # Check relevance
-            relevance_check_prompt = f"""
-            Determine if the following question is related to Connect America's internal support topics.
-            Respond with only one word: RELEVANT, NOT RELEVANT, GREETING, or INAPPROPRIATE.
+        # Mock response for testing
+        response = {
+            'response': f"Echo: {user_query}",
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        logger.info("Successfully processed request")
+        return jsonify(response)
 
-            Question: {user_query}
-
-            Response:
-            """
-            relevance_response = llm.predict(relevance_check_prompt)
-            
-            # Handle different types of responses
-            if "GREETING" in relevance_response.upper():
-                greeting_prompt = f"""
-                The following message is a greeting or casual message. Please provide a friendly and engaging response as Connect America's support assistant.
-                Make sure to mention that you're here to help with internal support topics.
-
-                Message: {user_query}
-
-                Response:
-                """
-                greeting_response = llm.predict(greeting_prompt)
-                return jsonify({
-                    'response': greeting_response,
-                    'contexts': []
-                })
-
-            elif "INAPPROPRIATE" in relevance_response.upper():
-                inappropriate_prompt = f"""
-                The following message contains inappropriate content. Provide a professional response that:
-                1. Maintains a polite and firm tone
-                2. Explains that you can only assist with appropriate, work-related queries
-                3. Encourages the user to ask a different question related to Connect America's internal support
-
-                Message: {user_query}
-
-                Response:
-                """
-                inappropriate_response = llm.predict(inappropriate_prompt)
-                return jsonify({
-                    'response': inappropriate_response,
-                    'contexts': []
-                })
-
-            elif "NOT RELEVANT" in relevance_response.upper():
-                not_relevant_prompt = f"""
-                The following question is not related to Connect America's internal support topics. Provide a response that:
-                1. Politely acknowledges the question
-                2. Explains that you are specialized in Connect America's internal support topics
-                3. Provides examples of topics you can help with
-                4. Encourages rephrasing the question to relate to internal support matters
-
-                Question: {user_query}
-
-                Response:
-                """
-                not_relevant_response = llm.predict(not_relevant_prompt)
-                return jsonify({
-                    'response': not_relevant_response,
-                    'contexts': []
-                })
-
-            # Process relevant query
-            formatted_history = [(msg["content"], "") for msg in chat_history]
-            rewritten_query = rewrite_query(user_query, formatted_history)
-            logging.debug(f"Query rewritten from '{user_query}' to '{rewritten_query}'")
-
-            retriever = CustomNeonRetriever(table_name="documents")
-            
-            qa_chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=retriever,
-                return_source_documents=True
-            )
-            
-            # Execute the chain with the query and chat history
-            chain_response = qa_chain({
-                "question": rewritten_query, 
-                "chat_history": formatted_history
-            })
-            
-            return jsonify({
-                'response': chain_response['answer'],
-                'contexts': [doc.page_content for doc in chain_response['source_documents']]
-            })
-            
-        except Exception as e:
-            logging.error(f"Error processing message: {str(e)}", exc_info=True)
-            return jsonify({'error': f'Error processing message: {str(e)}'}), 500
-            
     except Exception as e:
-        logging.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        # Detailed error logging
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        logger.error("Exception details:")
+        logger.error("Type: %s", exc_type)
+        logger.error("Value: %s", exc_value)
+        logger.error("Traceback:")
+        logger.error(traceback.format_exc())
+        
+        return jsonify({
+            'error': 'Internal server error',
+            'message': str(e),
+            'type': str(exc_type),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/search', methods=['POST'])
 def search():
@@ -420,7 +370,7 @@ def search():
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000','https://connect-america-2-frontend.vercel.app')
+    response.headers.add('Access-Control-Allow-Origin', 'https://connect-america-2-frontend.vercel.app')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
@@ -428,7 +378,25 @@ def after_request(response):
 # Add a test route to verify the API is working
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({'status': 'healthy'}), 200
+    try:
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({'status': 'unhealthy', 'error': str(e)}), 500
+
+# Basic error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    logger.error(f"404 error: {error}")
+    return jsonify({'error': 'Not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"500 error: {error}")
+    return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
