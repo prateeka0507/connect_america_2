@@ -29,7 +29,6 @@ class LLMResponseError(Exception):
 class LLMResponseCutOff(LLMResponseError):
     pass
 
-
 class LLMNoResponseError(LLMResponseError):
     pass
 
@@ -50,6 +49,7 @@ CORS(app, resources={
     }
 })
 
+
 # System instructions
 SYSTEM_INSTRUCTIONS = """You are an AI assistant for Connect America's internal support team. Your role is to:
 1. Analyze support documents and provide clear, professional responses
@@ -58,21 +58,25 @@ SYSTEM_INSTRUCTIONS = """You are an AI assistant for Connect America's internal 
 4. Maintain a professional, helpful tone
 5. If information isn't available in the provided context, clearly state that
 6. Always respond in English, regardless of the input language
+7. ONLY cite URLs from the source documents that directly support your answer using {{url:}} format
 
 Response Structure and Formatting:
    - Use markdown formatting with clear hierarchical structure
    - Each major section must start with '### ' followed by a number and bold title
    - Format section headers as: ### 1. **Title Here**
    - Use bullet points (-) for detailed explanations
+   - Each fact must be cited with {{url:}} format using ONLY the s3_url from the source document where that specific information was found
    - Keep responses clear, practical, and focused on support topics
 
-Remember:
-- Focus on analyzing the support documentation and explaining concepts naturally
-- Keep responses clear, practical, and focused on internal support expertise
+Example Response:
+Question: "What is the battery capacity of the smartwatch?"
+Context document s3_url: "s3://docs/specs.pdf" contains: "Battery: 600mAh"
+Correct response: "The smartwatch has a 600mAh battery capacity {{url:s3://docs/specs.pdf}}"
 """
-app.secret_key = os.urandom(24)  # Set a secret key for sessions
 
-# Access your API keys (set these in environment variables)
+app.secret_key = os.urandom(24)
+
+# Initialize API keys and environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
@@ -81,14 +85,11 @@ os.environ["LANGCHAIN_PROJECT"] = "connect-america"
 
 # Initialize Langchain components
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-4o-2024-11-20", temperature=0)
+llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-4o", temperature=0)
 
 logging.basicConfig(level=logging.DEBUG)
 
 def rewrite_query(query, chat_history=None):
-    """
-    Rewrites the user query to be more specific and searchable using LLM.
-    """
     try:
         rewrite_prompt = f"""You are Connect America's internal support assistant. Rewrite this query to be more specific and searchable, taking into account the chat history if provided. Only return the rewritten query without explanations.
 
@@ -110,6 +111,27 @@ def rewrite_query(query, chat_history=None):
         logging.error(f"Error in query rewriting: {str(e)}", exc_info=True)
         return query
 
+def process_response(response, source_documents):
+    """Extract and verify URLs from the response"""
+    url_pattern = r'\{url:(.*?)\}'
+    urls_in_response = re.findall(url_pattern, response)
+    
+    # Create a dictionary of valid URLs from source documents
+    valid_urls = {doc.metadata.get('s3_url'): doc for doc in source_documents if doc.metadata.get('s3_url')}
+    
+    verified_urls = []
+    for url in urls_in_response:
+        if url in valid_urls:
+            verified_urls.append({
+                'url': url,
+                'content': valid_urls[url].page_content
+            })
+    
+    # Clean up the response by removing the URL tags
+    cleaned_response = re.sub(url_pattern, '', response)
+    
+    return cleaned_response, verified_urls
+
 def verify_database():
     try:
         conn = psycopg2.connect(NEON_DB_URL)
@@ -127,68 +149,6 @@ def verify_database():
         logging.error(f"Database verification failed: {str(e)}", exc_info=True)
         return False
 
-def extract_text_from_docx(file):
-    doc = Document(file)
-    text = "\n".join([para.text for para in doc.paragraphs])
-    return text
-
-def extract_metadata_from_text(text):
-    title = text.split('\n')[0] if text else "Untitled Video"
-    return {"title": title}
-
-def upsert_transcript(transcript_text, metadata, index_name):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_text(transcript_text)
-    
-    try:
-        conn = psycopg2.connect(NEON_DB_URL)
-        with conn.cursor() as cur:
-            for i, chunk in enumerate(chunks):
-                chunk_metadata = metadata.copy()
-                chunk_metadata['chunk_id'] = f"{metadata['title']}_chunk_{i}"
-                chunk_metadata['url'] = metadata.get('url', '')
-                chunk_metadata['title'] = metadata.get('title', 'Unknown Video')
-                
-                # Generate embeddings for the chunk
-                chunk_embedding = embeddings.embed_query(chunk)
-                
-                # Insert into bents table
-                cur.execute("""
-                    INSERT INTO bents (text, title, url, chunk_id, vector)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (chunk_id) DO UPDATE
-                    SET text = EXCLUDED.text, vector = EXCLUDED.vector
-                """, (chunk, chunk_metadata['title'], chunk_metadata['url'], 
-                      chunk_metadata['chunk_id'], str(chunk_embedding)))
-        conn.commit()
-    except Exception as e:
-        logging.error(f"Error upserting transcript: {str(e)}")
-        raise
-    finally:
-        if conn:
-            conn.close()
-
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(LLMResponseError))
-def retry_llm_call(qa_chain, query, chat_history):
-    try:
-        result = qa_chain({"question": query, "chat_history": chat_history})
-        
-        if result is None or 'answer' not in result or not result['answer']:
-            raise LLMNoResponseError("LLM failed to generate a response")
-        
-        if result['answer'].endswith('...') or len(result['answer']) < 20:
-            raise LLMResponseCutOff("LLM response appears to be cut off")
-        return result
-    except Exception as e:
-        if isinstance(e, LLMResponseError):
-            logging.error(f"LLM call failed: {str(e)}")
-            raise
-        logging.error(f"Unexpected error in LLM call: {str(e)}")
-        raise LLMNoResponseError("LLM failed due to an unexpected error")
-
-def connect_to_db():
-    return psycopg2.connect(NEON_DB_URL)
-
 def get_embeddings(query):
     try:
         return embeddings.embed_query(query)
@@ -205,7 +165,7 @@ def search_neon_db(query_embedding, table_name="documents", top_k=5):
         conn = psycopg2.connect(NEON_DB_URL)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             query = f"""
-                SELECT id, vector, contents, title, chunk_id 
+                SELECT id, vector, contents, title, chunk_id, s3_url 
                 FROM {table_name}
                 WHERE vector IS NOT NULL
             """
@@ -232,6 +192,7 @@ def search_neon_db(query_embedding, table_name="documents", top_k=5):
                     'contents': row['contents'],
                     'title': row['title'],
                     'chunk_id': row['chunk_id'],
+                    's3_url': row['s3_url'],
                     'similarity_score': float(sim)
                 }
                 for sim, row in similarities[:top_k]
@@ -244,12 +205,6 @@ def search_neon_db(query_embedding, table_name="documents", top_k=5):
         if conn:
             conn.close()
 
-def handle_query(query):
-    query_embedding = get_embeddings(query)
-    results = search_neon_db(query_embedding)
-    return results
-
-# Update the custom retriever class
 class CustomNeonRetriever(BaseRetriever, BaseModel):
     table_name: str = Field(default="documents")
     
@@ -263,7 +218,8 @@ class CustomNeonRetriever(BaseRetriever, BaseModel):
                 page_content=result['contents'],
                 metadata={
                     'title': result['title'],
-                    'source': self.table_name
+                    'source': self.table_name,
+                    's3_url': result['s3_url']
                 }
             )
             documents.append(doc)
@@ -273,44 +229,69 @@ class CustomNeonRetriever(BaseRetriever, BaseModel):
         return await self._get_relevant_documents(query)
 
 @app.route('/')
-@app.route('/database')
 def serve_spa():
     return jsonify({"message": "Hello from Connect America API"})
-
-@app.route('/test', methods=['GET'])
-def test():
-    return jsonify({
-        'status': 'success',
-        'message': 'API is running'
-    })
 
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        # Log incoming request
-        app.logger.debug(f"Received request: {request.json}")
+        data = request.get_json()
         
-        # Get the data from request
-        data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data received'}), 400
+        
         user_query = data.get('message')
         chat_history = data.get('chat_history', [])
-
+        
         if not user_query:
             return jsonify({'error': 'No message provided'}), 400
 
         try:
-            # Check relevance
+            # Format chat history correctly
+            formatted_history = []
+            for msg in chat_history:
+                if isinstance(msg, dict):
+                    if 'role' in msg and 'content' in msg:
+                        formatted_history.append((msg['content'], ''))
+                else:
+                    logging.warning(f"Unexpected chat history format: {msg}")
+            
+            # Detailed relevance check
             relevance_check_prompt = f"""
-            Determine if the following question is related to Connect America's internal support topics.
-            Respond with only one word: RELEVANT, NOT RELEVANT, GREETING, or INAPPROPRIATE.
+            Given the following question or message and the chat history, determine if it is:
+            1. A greeting or send-off (like "hello", "thank you", "goodbye", or casual messages)
+            2. Related to Connect America's core services:
+                - Medical Alert Systems and Devices
+                - Remote Patient Monitoring Systems
+                - Care Management Services
+                - Customer Service Operations
+                - Medication Management Solutions
+            3. Related to:
+                - Device setup, troubleshooting, or maintenance
+                - Patient monitoring procedures
+                - Care coordination processes
+                - Customer support protocols
+                - Medication tracking systems
+            4. A follow-up question to the previous conversation about these topics
+            5. Contains inappropriate or harmful content
+            6. Completely unrelated to Connect America's healthcare services
 
-            Question: {user_query}
+            If it falls under category 1, respond with 'GREETING'. 
+            If it falls under categories 2, 3, or 4 respond with 'RELEVANT'.
+            If it falls under category 5, respond with 'INAPPROPRIATE'.
+            If it falls under category 6, respond with 'NOT RELEVANT'.
 
-            Response:
+            Chat History:
+            {formatted_history[-3:] if formatted_history else "No previous context"}
+
+            Current Question: {user_query}
+            
+            Response (GREETING, RELEVANT, INAPPROPRIATE, or NOT RELEVANT):
             """
+            
             relevance_response = llm.predict(relevance_check_prompt)
             
-            # Handle different types of responses
+            # Handle non-relevant cases using LLM
             if "GREETING" in relevance_response.upper():
                 greeting_prompt = f"""
                 The following message is a greeting or casual message. Please provide a friendly and engaging response as Connect America's support assistant.
@@ -323,7 +304,8 @@ def chat():
                 greeting_response = llm.predict(greeting_prompt)
                 return jsonify({
                     'response': greeting_response,
-                    'contexts': []
+                    'contexts': [],
+                    'urls': []
                 })
 
             elif "INAPPROPRIATE" in relevance_response.upper():
@@ -340,7 +322,8 @@ def chat():
                 inappropriate_response = llm.predict(inappropriate_prompt)
                 return jsonify({
                     'response': inappropriate_response,
-                    'contexts': []
+                    'contexts': [],
+                    'urls': []
                 })
 
             elif "NOT RELEVANT" in relevance_response.upper():
@@ -358,31 +341,54 @@ def chat():
                 not_relevant_response = llm.predict(not_relevant_prompt)
                 return jsonify({
                     'response': not_relevant_response,
-                    'contexts': []
+                    'contexts': [],
+                    'urls': []
                 })
 
             # Process relevant query
-            formatted_history = [(msg["content"], "") for msg in chat_history]
             rewritten_query = rewrite_query(user_query, formatted_history)
-            logging.debug(f"Query rewritten from '{user_query}' to '{rewritten_query}'")
-
+            
             retriever = CustomNeonRetriever(table_name="documents")
+            relevant_docs = retriever.get_relevant_documents(rewritten_query)
+            
+            # Create prompt with source URLs
+            prompt = ChatPromptTemplate.from_messages([
+                SystemMessagePromptTemplate.from_template(SYSTEM_INSTRUCTIONS),
+                HumanMessagePromptTemplate.from_template(
+                    "Context: {context}\n\n"
+                    "Available source URLs:\n{urls}\n\n"
+                    "Chat History: {chat_history}\n\n"
+                    "Question: {question}"
+                )
+            ])
             
             qa_chain = ConversationalRetrievalChain.from_llm(
                 llm=llm,
                 retriever=retriever,
+                combine_docs_chain_kwargs={"prompt": prompt},
                 return_source_documents=True
             )
             
-            # Execute the chain with the query and chat history
+            # Execute the chain with URLs included
             chain_response = qa_chain({
-                "question": rewritten_query, 
-                "chat_history": formatted_history
+                "question": rewritten_query,
+                "chat_history": formatted_history,
+                "urls": "\n".join([f"- {doc.metadata.get('s3_url', '')}" for doc in relevant_docs])
             })
             
+            # Process the response to extract and verify URLs
+            processed_response, verified_urls = process_response(
+                chain_response['answer'],
+                chain_response['source_documents']
+            )
+            
             return jsonify({
-                'response': chain_response['answer'],
-                'contexts': [doc.page_content for doc in chain_response['source_documents']]
+                'response': processed_response,
+                'contexts': [{
+                    'content': doc.page_content,
+                    's3_url': doc.metadata.get('s3_url')
+                } for doc in chain_response['source_documents']],
+                'urls': verified_urls
             })
             
         except Exception as e:
@@ -402,13 +408,9 @@ def search():
         if not query:
             return jsonify({'error': 'Query is required'}), 400
 
-        # Generate embeddings for the query
         query_embedding = get_embeddings(query)
-        
-        # Get raw results from database
         results = search_neon_db(query_embedding)
         
-        # Return only the database results
         return jsonify({
             'results': results,
             'count': len(results)
@@ -425,10 +427,6 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
-# Add a test route to verify the API is working
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({'status': 'healthy'}), 200
-
 if __name__ == '__main__':
-    app.run(debug=True)
+    verify_database()
+    app.run(debug=True, port=5000)
