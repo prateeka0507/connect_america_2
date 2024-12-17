@@ -5,9 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import { KeyboardEvent } from 'react';
 
 export default function ChatPage() {
-  const { messages, sendMessage, loading, error: chatError } = useChat();
+  const { messages, sendMessage, loading } = useChat();
   const [inputValue, setInputValue] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -155,12 +154,6 @@ export default function ChatPage() {
                 <div className="animate-spin">⟳</div>
                 <div>Processing your request...</div>
               </div>
-            </div>
-          )}
-          
-          {(error || chatError) && (
-            <div className="bg-red-50 py-3 px-4 text-red-600 text-sm">
-              {error || chatError}
             </div>
           )}
           <div ref={messagesEndRef} />
