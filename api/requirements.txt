@@ -1,0 +1,25 @@
+# Web Framework
+Flask
+flask-cors
+Werkzeug
+
+# Database
+psycopg2-binary
+python-dotenv
+
+# Document Processing
+python-docx
+
+# LangChain and OpenAI Integration
+langchain
+langchain-openai
+langsmith
+openai
+
+# Utilities
+tenacity
+numpy
+pydantic
+
+# Type Hints
+typing-extensions
