@@ -287,20 +287,14 @@ def test():
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        # Log the incoming request
-        logging.debug(f"Received headers: {dict(request.headers)}")
-        logging.debug(f"Received raw data: {request.get_data()}")
+        # Log incoming request
+        app.logger.debug(f"Received request: {request.json}")
         
-        # Parse the JSON data
-        data = request.get_json()
-        logging.debug(f"Parsed JSON data: {data}")
-        
-        if not data:
-            return jsonify({'error': 'No JSON data received'}), 400
-        
+        # Get the data from request
+        data = request.json
         user_query = data.get('message')
         chat_history = data.get('chat_history', [])
-        
+
         if not user_query:
             return jsonify({'error': 'No message provided'}), 400
 
@@ -426,11 +420,15 @@ def search():
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000','https://connect-america-2-frontend.vercel.app')
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:3000')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
+# Add a test route to verify the API is working
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'healthy'}), 200
+
 if __name__ == '__main__':
-    verify_database()
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
