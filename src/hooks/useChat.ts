@@ -1,6 +1,6 @@
 // hooks/useChat.ts
 import { useState } from 'react';
-import { ChatMessage, ChatResponse } from '@/types/chat';
+import { ChatMessage } from '@/types/chat';
 
 // Direct URL instead of environment variable
 const API_URL = 'https://connect-america-2.vercel.app';
