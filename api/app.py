@@ -267,6 +267,7 @@ def chat():
                 - Care Management Services
                 - Customer Service Operations
                 - Medication Management Solutions
+                - asking about the company
             3. Related to:
                 - Device setup, troubleshooting, or maintenance
                 - Patient monitoring procedures
