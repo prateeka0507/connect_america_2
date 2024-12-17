@@ -39,7 +39,16 @@ load_dotenv()
 NEON_DB_URL = os.getenv("POSTGRES_URL")
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000","https://connect-america-2-frontend.vercel.app"]}})
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://connect-america-2-frontend.vercel.app",
+            "http://localhost:3000"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # System instructions
 SYSTEM_INSTRUCTIONS = """You are an AI assistant for Connect America's internal support team. Your role is to:
